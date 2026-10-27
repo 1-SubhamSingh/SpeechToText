@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/speech_to_text;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+speech:
+  # In dev, default to mock if DEEPGRAM_API_KEY is not supplied
+  provider: ${SPEECH_PROVIDER:mock}
