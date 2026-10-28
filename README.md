@@ -13,11 +13,11 @@
 - **Accurate Code-Switching (Hindi + English)**: Handles seamless transitions between English and Hindi (Devanagari) within the same sentence.
 - **Provisional Partial vs Finalized Distinction**: Live provisional text is displayed in a soft highlighted state that continuously updates without creating duplicate entries. Once speech finishes or pauses, finalized segments are permanently appended exactly once.
 - **Provider Abstraction Layer**: Built with a modular plug-and-play architecture supporting:
-  - **Deepgram Nova-2** (Default production streaming provider via backend WebSocket proxy)
+  - **Google Gemini Live (`gemini-2.0-flash-live-001`)** (Default real-time streaming AI provider via Google Generative Service WebSocket)
+  - **Deepgram Nova-2** (Alternative production streaming provider via backend WebSocket proxy)
   - **Mock Hinglish Engine** (Offline test simulator for deterministic unit/integration testing)
   - **Browser Web Speech API** (Client-native zero-dependency fallback for instant prototyping)
-  - Pluggable extension points for **Google Gemini Live** or self-hosted **Whisper streaming**.
-- **Backend Credential Security**: Third-party API credentials (`DEEPGRAM_API_KEY`) reside exclusively on the Spring Boot backend; no credentials are ever exposed to the client.
+- **Backend Credential Security**: Third-party API credentials (`GEMINI_API_KEY`, `DEEPGRAM_API_KEY`) reside exclusively on the Spring Boot backend; no credentials are ever exposed to the client.
 - **Full History & Transcript Management**:
   - Full CRUD operations backed by PostgreSQL and managed by Flyway migrations.
   - Search by title or transcript content.
@@ -226,9 +226,9 @@ Base URL: `http://localhost:8080/api/transcriptions`
 ```json
 {
   "action": "start",
-  "provider": "deepgram",
+  "provider": "gemini",
   "language": "hi",
-  "model": "nova-2"
+  "model": "gemini-2.0-flash-live-001"
 }
 ```
 3. **Client streams raw audio chunks**:
@@ -269,8 +269,9 @@ cp .env.example .env
 | `SPRING_DATASOURCE_URL` | PostgreSQL connection URL | `jdbc:postgresql://localhost:5432/speech_to_text` |
 | `DB_USER` | PostgreSQL username | `postgres` |
 | `DB_PASSWORD` | PostgreSQL password | `postgres` |
-| `SPEECH_PROVIDER` | Default STT provider (`deepgram` or `mock`) | `deepgram` |
-| `DEEPGRAM_API_KEY` | Deepgram API key (for live streaming) | Optional (mock / browser engine available) |
+| `SPEECH_PROVIDER` | Default STT provider (`gemini`, `deepgram`, or `mock`) | `gemini` |
+| `GEMINI_API_KEY` | Google Gemini API key (for Gemini 2.0 Flash Live) | From [Google AI Studio](https://aistudio.google.com/apikey) |
+| `DEEPGRAM_API_KEY` | Deepgram API key (alternative provider) | Optional (mock / browser engine available) |
 | `DEEPGRAM_MODEL` | Deepgram model | `nova-2` |
 | `DEEPGRAM_LANGUAGE` | Deepgram language | `hi` (Hindi + English) |
 | `CORS_ALLOWED_ORIGINS` | Permitted frontend origins | `http://localhost:5173,http://localhost:3000` |
