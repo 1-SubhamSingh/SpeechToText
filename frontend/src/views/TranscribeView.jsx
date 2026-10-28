@@ -132,7 +132,7 @@ export default function TranscribeView() {
         await streamerRef.current.start({
           provider: provider, // 'gemini', 'deepgram', or 'mock'
           language: language,
-          model: provider === 'deepgram' ? 'nova-2' : 'gemini-2.0-flash-live-001',
+          model: provider === 'deepgram' ? 'nova-2' : 'gemini-3.5-transcribe-live',
         });
         setIsRecording(true);
       }

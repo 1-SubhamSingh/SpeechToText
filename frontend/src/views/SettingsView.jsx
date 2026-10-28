@@ -156,7 +156,7 @@ export default function SettingsView() {
               onChange={(e) => setDefaultProvider(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 focus:border-brand-500 text-sm text-white outline-none"
             >
-              <option value="gemini">✨ Gemini Live (gemini-2.0-flash-live-001) — Recommended</option>
+              <option value="gemini">✨ Gemini Live (gemini-3.5-transcribe-live) — Recommended</option>
               <option value="deepgram">Deepgram Nova-2 (WebSocket Streaming via Backend)</option>
               <option value="mock">Mock Engine (Offline Hinglish Simulator for Testing)</option>
               <option value="browser">Browser Web Speech API (Client-Native Free Fallback)</option>

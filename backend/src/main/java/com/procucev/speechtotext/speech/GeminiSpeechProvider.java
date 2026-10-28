@@ -15,23 +15,16 @@ import java.net.URI;
 import java.nio.ByteBuffer;
 import java.util.Base64;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Gemini Live API real-time speech-to-text provider.
  *
- * Uses the Gemini 2.0 Flash Live model via bidirectional WebSocket streaming.
+ * Uses the Gemini Live transcribe model (gemini-3.5-transcribe-live) via bidirectional WebSocket streaming.
  * Audio (16kHz, 16-bit PCM, mono) is streamed to Gemini as base64-encoded chunks.
  * Gemini returns incremental transcription text events in real time.
- *
- * Protocol:
- *   1. Connect to wss://generativelanguage.googleapis.com/ws/...BidiGenerateContent?key={API_KEY}
- *   2. Send a BidiGenerateContentSetup message with model and system instructions
- *   3. Send BidiGenerateContentRealtimeInput messages with base64 audio chunks
- *   4. Receive BidiGenerateContentServerContent with text parts (incremental transcription)
- *   5. Send BidiGenerateContentClientContent with turnComplete=true to signal end of turn
  */
 @Component
 public class GeminiSpeechProvider implements SpeechRecognitionService {
@@ -43,8 +36,8 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
     private static final String GEMINI_LIVE_WS_URL =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
-    // Model to use for live streaming
-    private static final String GEMINI_MODEL = "models/gemini-2.0-flash-live-001";
+    // Model for real-time speech-to-text bidirectional streaming
+    private static final String GEMINI_MODEL = "models/gemini-3.5-transcribe-live";
 
     @Value("${speech.gemini.api-key:}")
     private String apiKey;
@@ -71,15 +64,6 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
             GeminiWebSocketSession session = new GeminiWebSocketSession(
                     URI.create(wsUrl), listener, language);
             session.connect();
-
-            // Wait for connection + setup acknowledgement (up to 12 seconds)
-            if (!session.awaitReady(12)) {
-                listener.onEvent(SpeechRecognitionEvent.error(
-                        "Gemini Live API connection timed out. Check your API key and network."));
-                session.cancel();
-                return new NoOpSession();
-            }
-
             return session;
 
         } catch (Exception e) {
@@ -99,7 +83,7 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
         private final String language;
         private final AtomicBoolean closed = new AtomicBoolean(false);
         private final AtomicBoolean setupAcknowledged = new AtomicBoolean(false);
-        private final CountDownLatch readyLatch = new CountDownLatch(1);
+        private final Queue<byte[]> pendingAudio = new ConcurrentLinkedQueue<>();
 
         // Buffer to accumulate partial transcription text within a server turn
         private final StringBuilder partialBuffer = new StringBuilder();
@@ -110,20 +94,15 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
             this.language = language;
         }
 
-        boolean awaitReady(int timeoutSeconds) throws InterruptedException {
-            return readyLatch.await(timeoutSeconds, TimeUnit.SECONDS);
-        }
-
         @Override
         public void onOpen(ServerHandshake handshakedata) {
             log.info("Gemini Live WebSocket connected, HTTP status: {}", handshakedata.getHttpStatus());
-            listener.onEvent(SpeechRecognitionEvent.status("Connected to Gemini Live API — sending setup…"));
+            listener.onEvent(SpeechRecognitionEvent.status("Connected to Gemini Live API — initializing session…"));
             sendSetupMessage();
         }
 
         /**
          * Build and send the BidiGenerateContentSetup message.
-         * We instruct the model to act as a transcription engine.
          */
         private void sendSetupMessage() {
             try {
@@ -131,9 +110,10 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
                 ObjectNode setup = root.putObject("setup");
                 setup.put("model", GEMINI_MODEL);
 
-                // Generation config — output as text only
+                // Generation config — text response modality
                 ObjectNode genConfig = setup.putObject("generationConfig");
-                genConfig.put("responseModalities", "TEXT");
+                ArrayNode respModalities = genConfig.putArray("responseModalities");
+                respModalities.add("TEXT");
 
                 // System instruction: pure transcription mode
                 ObjectNode systemInstruction = setup.putObject("systemInstruction");
@@ -146,8 +126,9 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
                         "Do NOT translate. Do NOT add explanations. Output ONLY the verbatim transcription text. " +
                         "If the audio is silent or unclear, output nothing.");
 
-                send(MAPPER.writeValueAsString(root));
-                log.debug("Gemini setup message sent");
+                String payload = MAPPER.writeValueAsString(root);
+                send(payload);
+                log.info("Gemini setup message sent for model {}", GEMINI_MODEL);
             } catch (Exception e) {
                 log.error("Failed to send Gemini setup message", e);
                 listener.onError(e);
@@ -155,17 +136,35 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
         }
 
         @Override
+        public void onMessage(ByteBuffer bytes) {
+            try {
+                byte[] arr = new byte[bytes.remaining()];
+                bytes.get(arr);
+                String text = new String(arr, java.nio.charset.StandardCharsets.UTF_8);
+                onMessage(text);
+            } catch (Exception e) {
+                log.warn("Failed to decode binary message from Gemini", e);
+            }
+        }
+
+        @Override
         public void onMessage(String message) {
             try {
+                log.info("Gemini incoming message: {}", message.length() > 250 ? message.substring(0, 250) + "..." : message);
                 JsonNode root = MAPPER.readTree(message);
 
                 // ── Setup acknowledgement ─────────────────────────────────
                 if (root.has("setupComplete")) {
-                    log.info("Gemini Live setup acknowledged — ready to receive audio");
+                    log.info("Gemini Live setup acknowledged — flushing pending audio chunks");
                     setupAcknowledged.set(true);
-                    readyLatch.countDown();
                     listener.onEvent(SpeechRecognitionEvent.status(
                             "Gemini Live ready — speak now (Hindi / English / Hinglish)"));
+
+                    // Flush buffered audio chunks that arrived before setup was acknowledged
+                    byte[] chunk;
+                    while ((chunk = pendingAudio.poll()) != null) {
+                        sendMediaChunk(chunk);
+                    }
                     return;
                 }
 
@@ -205,7 +204,7 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
 
                 // ── Tool-call or other control messages ───────────────────
                 if (root.has("toolCall") || root.has("toolCallCancellation")) {
-                    log.debug("Gemini tool message received (ignored): {}", message.substring(0, Math.min(200, message.length())));
+                    log.debug("Gemini tool message received (ignored)");
                     return;
                 }
 
@@ -218,8 +217,6 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
                     return;
                 }
 
-                log.debug("Gemini unhandled message: {}", message.substring(0, Math.min(300, message.length())));
-
             } catch (Exception e) {
                 log.warn("Error parsing Gemini message", e);
             }
@@ -228,7 +225,6 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
         @Override
         public void onClose(int code, String reason, boolean remote) {
             closed.set(true);
-            readyLatch.countDown(); // unblock awaitReady in case closed before ack
             log.info("Gemini WebSocket closed. Code={}, Reason={}, Remote={}", code, reason, remote);
 
             // Flush any remaining partial text as a final result
@@ -253,11 +249,21 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
         public void sendAudio(byte[] audioChunk) {
             if (!isOpen() || audioChunk == null || audioChunk.length == 0) return;
 
+            if (!setupAcknowledged.get()) {
+                // Buffer audio until Gemini setupComplete is received
+                pendingAudio.add(audioChunk);
+                return;
+            }
+
+            sendMediaChunk(audioChunk);
+        }
+
+        private void sendMediaChunk(byte[] audioChunk) {
             try {
-                // Build BidiGenerateContentRealtimeInput with audio data
                 ObjectNode root = MAPPER.createObjectNode();
                 ObjectNode realtimeInput = root.putObject("realtimeInput");
-                ObjectNode mediaChunk = realtimeInput.putObject("mediaChunks");
+                ArrayNode mediaChunks = realtimeInput.putArray("mediaChunks");
+                ObjectNode mediaChunk = mediaChunks.addObject();
                 mediaChunk.put("mimeType", "audio/pcm;rate=16000");
                 mediaChunk.put("data", Base64.getEncoder().encodeToString(audioChunk));
 
@@ -292,7 +298,7 @@ public class GeminiSpeechProvider implements SpeechRecognitionService {
         @Override
         public void cancel() {
             closed.set(true);
-            readyLatch.countDown();
+            pendingAudio.clear();
             try {
                 close();
             } catch (Exception ignored) {}
