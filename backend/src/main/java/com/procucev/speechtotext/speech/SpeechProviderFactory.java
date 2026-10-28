@@ -13,7 +13,7 @@ public class SpeechProviderFactory {
 
     private final Map<SpeechProviderType, SpeechRecognitionService> providers;
 
-    @Value("${speech.provider:deepgram}")
+    @Value("${speech.provider:gemini}")
     private String defaultProviderName;
 
     public SpeechProviderFactory(List<SpeechRecognitionService> serviceList) {
@@ -31,8 +31,10 @@ public class SpeechProviderFactory {
             }
         } catch (IllegalArgumentException ignored) {
         }
-        // Fallback to MOCK or DEEPGRAM
-        return providers.getOrDefault(SpeechProviderType.DEEPGRAM, providers.get(SpeechProviderType.MOCK));
+        // Fallback chain: GEMINI → MOCK
+        SpeechRecognitionService gemini = providers.get(SpeechProviderType.GEMINI);
+        if (gemini != null) return gemini;
+        return providers.get(SpeechProviderType.MOCK);
     }
 
     public SpeechRecognitionService getDefaultProvider() {

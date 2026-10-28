@@ -36,7 +36,7 @@ management:
 # Speech-to-Text Recognition Settings
 speech:
   # Provider options: deepgram, mock, whisper
-  provider: ${SPEECH_PROVIDER:deepgram}
+  provider: ${SPEECH_PROVIDER:gemini}
   deepgram:
     api-key: ${DEEPGRAM_API_KEY:}
     model: ${DEEPGRAM_MODEL:nova-2}
