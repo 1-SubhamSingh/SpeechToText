@@ -37,7 +37,7 @@ export default function TranscribeView() {
   const [isEditable, setIsEditable] = useState(false);
 
   // Configuration options
-  const [provider, setProvider] = useState(() => localStorage.getItem('procucev_provider') || 'deepgram');
+  const [provider, setProvider] = useState(() => localStorage.getItem('procucev_provider') || 'gemini');
   const [language, setLanguage] = useState(() => localStorage.getItem('procucev_lang') || 'hi-IN');
 
   // Modals & feedback
@@ -130,9 +130,9 @@ export default function TranscribeView() {
         });
 
         await streamerRef.current.start({
-          provider: provider, // 'deepgram' or 'mock'
+          provider: provider, // 'gemini', 'deepgram', or 'mock'
           language: language,
-          model: 'nova-2',
+          model: provider === 'deepgram' ? 'nova-2' : 'gemini-2.0-flash-live-001',
         });
         setIsRecording(true);
       }
@@ -240,6 +240,9 @@ export default function TranscribeView() {
               disabled={isRecording}
               className="bg-transparent text-slate-200 outline-none font-medium cursor-pointer"
             >
+              <option value="gemini" className="bg-slate-900 text-slate-200">
+                ✨ Gemini Live (Real-Time AI)
+              </option>
               <option value="deepgram" className="bg-slate-900 text-slate-200">
                 Deepgram Nova-2 (WebSocket)
               </option>
